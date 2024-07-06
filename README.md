@@ -1,5 +1,6 @@
 # DL基礎講座2024　最終課題「Visual Question Answering（VQA）」
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nogikun/dl_lecture_competition_pub/blob/VQA-competition/main_notebook.ipynb)
 
 ## 環境構築
 ### Conda
