@@ -1,5 +1,8 @@
 data/*
+
+# slurm
 slurm/*
+!slurm/.gitkeep
 
 # venv
 dl_basic/*
