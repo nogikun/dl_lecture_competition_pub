@@ -11,6 +11,7 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -69,19 +70,19 @@ class VQADataset(torch.utils.data.Dataset):
         self.answer = answer
 
         # question / answerの辞書を作成
-        self.words2idx = {}
-        #self.answer2idx = {}
-        self.idx2words = {}
-        #self.idx2answer = {}
+        self.question2idx = {}
+        self.answer2idx = {}
+        self.idx2question = {}
+        self.idx2answer = {}
 
         # 質問文に含まれる単語を辞書に追加
         for question in self.df["question"]:
             question = process_text(question)
             words = question.split(" ")
             for word in words:
-                if word not in self.words2idx:
-                    self.words2idx[word] = len(self.words2idx)
-        self.idx2words = {v: k for k, v in self.words2idx.items()}  # 逆変換用の辞書(question)
+                if word not in self.question2idx:
+                    self.question2idx[word] = len(self.question2idx)
+        self.idx2question = {v: k for k, v in self.question2idx.items()}  # 逆変換用の辞書(question)
 
         if self.answer:
             # 回答に含まれる単語を辞書に追加
@@ -89,9 +90,9 @@ class VQADataset(torch.utils.data.Dataset):
                 for answer in answers:
                     word = answer["answer"]
                     word = process_text(word)
-                    if word not in self.words2idx:
-                        self.words2idx[word] = len(self.words2idx)
-            self.idx2words = {v: k for k, v in self.words2idx.items()}  # 逆変換用の辞書(answer)
+                    if word not in self.answer2idx:
+                        self.answer2idx[word] = len(self.answer2idx)
+            self.idx2answer = {v: k for k, v in self.answer2idx.items()}  # 逆変換用の辞書(answer)
 
     def update_dict(self, dataset):
         """
@@ -102,12 +103,10 @@ class VQADataset(torch.utils.data.Dataset):
         dataset : Dataset
             訓練データのDataset
         """
-        self.words2idx = dataset.words2idx
-        self.idx2words = dataset.idx2words
-        #self.question2idx = dataset.question2idx
-        #self.answer2idx = dataset.answer2idx
-        #self.idx2question = dataset.idx2question
-        #self.idx2answer = dataset.idx2answer
+        self.question2idx = dataset.question2idx
+        self.answer2idx = dataset.answer2idx
+        self.idx2question = dataset.idx2question
+        self.idx2answer = dataset.idx2answer
 
     def __getitem__(self, idx):
         """
@@ -131,16 +130,16 @@ class VQADataset(torch.utils.data.Dataset):
         """
         image = Image.open(f"{self.image_dir}/{self.df['image'][idx]}")
         image = self.transform(image)
-        question = np.zeros(len(self.idx2words) + 1)  # 未知語用の要素を追加
+        question = np.zeros(len(self.idx2question) + 1)  # 未知語用の要素を追加
         question_words = self.df["question"][idx].split(" ")
         for word in question_words:
             try:
-                question[self.words2idx[word]] = 1  # one-hot表現に変換
+                question[self.question2idx[word]] = 1  # one-hot表現に変換
             except KeyError:
                 question[-1] = 1  # 未知語
 
         if self.answer:
-            answers = [self.words2idx[process_text(answer["answer"])] for answer in self.df["answers"][idx]]
+            answers = [self.answer2idx[process_text(answer["answer"])] for answer in self.df["answers"][idx]]
             mode_answer_idx = mode(answers)  # 最頻値を取得（正解ラベル）
 
             return image, torch.Tensor(question), torch.Tensor(answers), int(mode_answer_idx)
@@ -363,7 +362,6 @@ def main():
     # deviceの設定
     set_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f'device : {device}') # 確認の為
 
     # dataloader / model
     transform = transforms.Compose([
@@ -377,7 +375,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    model = VQAModel(vocab_size=len(train_dataset.words2idx)+1, n_answer=len(train_dataset.words2idx)).to(device)
+    model = VQAModel(vocab_size=len(train_dataset.question2idx)+1, n_answer=len(train_dataset.answer2idx)).to(device)
 
     # optimizer / criterion
     num_epoch = 20
