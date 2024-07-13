@@ -294,7 +294,7 @@ def ResNet50():
 class VQAModel(nn.Module):
     def __init__(self, vocab_size: int, n_answer: int):
         super().__init__()
-        self.resnet = ResNet18()
+        self.resnet = ResNet50()
         self.text_encoder = nn.Linear(vocab_size, 512)
 
         self.fc = nn.Sequential(
