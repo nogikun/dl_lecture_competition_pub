@@ -9,3 +9,6 @@ dl_basic/*
 
 # models
 model.pth
+
+# wandb
+wandb/*

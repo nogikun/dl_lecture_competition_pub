@@ -11,6 +11,9 @@ import torch.nn as nn
 import torchvision
 from torchvision import transforms
 
+from tqdm import tqdm
+import wandb
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -319,7 +322,7 @@ def train(model, dataloader, optimizer, criterion, device):
     simple_acc = 0
 
     start = time.time()
-    for image, question, answers, mode_answer in dataloader:
+    for image, question, answers, mode_answer in tqdm(dataloader):
         image, question, answer, mode_answer = \
             image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
 
@@ -360,6 +363,9 @@ def eval(model, dataloader, optimizer, criterion, device):
 
 
 def main():
+    # WandB
+    wandb.init(project="DL_lec-VQA_models") # name = {displayname} で保存名を指定することも可能
+
     # deviceの設定
     set_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -392,6 +398,13 @@ def main():
               f"train loss: {train_loss:.4f}\n"
               f"train acc: {train_acc:.4f}\n"
               f"train simple acc: {train_simple_acc:.4f}")
+        
+        training_log = {
+            "train_time": train_time,
+            "train_loss" : train_loss,
+            "train_acc" : train_acc
+        }
+        wandb.log(training_log)
 
     # 提出用ファイルの作成
     model.eval()
@@ -406,6 +419,8 @@ def main():
     submission = np.array(submission)
     torch.save(model.state_dict(), "model.pth")
     np.save("submission.npy", submission)
+
+    wandb.finish()
 
 if __name__ == "__main__":
     main()
