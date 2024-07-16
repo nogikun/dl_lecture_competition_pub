@@ -14,6 +14,9 @@ from torchvision import transforms
 from tqdm import tqdm
 import wandb
 
+# local
+from src.models.IMAGE import model_ViT
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -312,6 +315,42 @@ class VQAModel(nn.Module):
 
         return x
 
+class VQAModel(nn.Module):
+    def __init__(self, vocab_size: int, n_answer: int,
+                 hidden_dim: int=384*4, dropout: float=0.01):
+        super().__init__()
+        self.vit = model_ViT.ViT(in_channels=3,
+                                 num_classes=n_answer, # or n_answer
+                                 emb_dim=384,
+                                 num_patch_row=4,#
+                                 image_size=224,
+                                 num_blocks=7*4,
+                                 head=8,
+                                 hidden_dim=384*4,
+                                 dropout=dropout)
+        self.text_encoder = nn.Linear(vocab_size, 512)
+        self.fc = nn.Sequential(
+            nn.Linear(42944, hidden_dim), # what 42944
+            #nn.ReLU(inplace=True),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 512),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(512, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, n_answer)
+        )
+
+    def forward(self, image, question):
+        image_feature = self.vit(image)  # 画像の特徴量
+        question_feature = self.text_encoder(question)  # テキストの特徴量
+
+        x = torch.cat([image_feature, question_feature], dim=1)
+        x = self.fc(x)
+
+        return x
 
 # 4. 学習の実装
 def train(model, dataloader, optimizer, criterion, device):
@@ -323,18 +362,19 @@ def train(model, dataloader, optimizer, criterion, device):
 
     start = time.time()
     for image, question, answers, mode_answer in tqdm(dataloader):
+        #input(image.shape)
         image, question, answer, mode_answer = \
-            image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
+            image.to(device), question.to(device), answers.to(device), mode_answer.to(device) # 変数をGPUへ移動させている
 
-        pred = model(image, question)
-        loss = criterion(pred, mode_answer.squeeze())
+        pred = model(image, question) # 順伝播
+        loss = criterion(pred, mode_answer.squeeze()) # ロス値の計算
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad() # optim
+        loss.backward() # 誤差逆伝播
+        optimizer.step() # パラメータの更新
 
         total_loss += loss.item()
-        total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy
+        total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy（argmaxで多数決で最大のものを回答としている。）
         simple_acc += (pred.argmax(1) == mode_answer).float().mean().item()  # simple accuracy
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
@@ -348,7 +388,7 @@ def eval(model, dataloader, optimizer, criterion, device):
     simple_acc = 0
 
     start = time.time()
-    for image, question, answers, mode_answer in dataloader:
+    for image, question, answers, mode_answer in tqdm(dataloader):
         image, question, answer, mode_answer = \
             image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
 
@@ -357,7 +397,7 @@ def eval(model, dataloader, optimizer, criterion, device):
 
         total_loss += loss.item()
         total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy
-        simple_acc += (pred.argmax(1) == mode_answer).mean().item()  # simple accuracy
+        simple_acc += (pred.argmax(1) == mode_answer).float().mean().item()  # simple accuracy
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
@@ -380,7 +420,13 @@ def main():
     test_dataset = VQADataset(df_path="./data/valid.json", image_dir="./data/valid", transform=transform, answer=False)
     test_dataset.update_dict(train_dataset)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
+    # 分割サイズを指定（8:2）
+    train_size = int(0.8 * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+    train_subset, val_subset = torch.utils.data.random_split(train_dataset, [train_size, val_size]) # 分割
+
+    train_loader = torch.utils.data.DataLoader(train_subset, batch_size=128, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_subset, batch_size=128, shuffle=True) # 検証用に追加
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     model = VQAModel(vocab_size=len(train_dataset.words2idx)+1, n_answer=len(train_dataset.words2idx)).to(device)
@@ -388,21 +434,32 @@ def main():
     # optimizer / criterion
     num_epoch = 20
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-5)
 
     # train model
     for epoch in range(num_epoch):
         train_loss, train_acc, train_simple_acc, train_time = train(model, train_loader, optimizer, criterion, device)
+        val_loss, val_acc, val_simple_acc, val_time = eval(model, val_loader, optimizer, criterion, device)
+
         print(f"【{epoch + 1}/{num_epoch}】\n"
+              f"<train>"
               f"train time: {train_time:.2f} [s]\n"
               f"train loss: {train_loss:.4f}\n"
               f"train acc: {train_acc:.4f}\n"
-              f"train simple acc: {train_simple_acc:.4f}")
+              f"train simple acc: {train_simple_acc:.4f}\n"
+              f"<valid>"
+              f"val time: {val_time:.2f} [s]\n"
+              f"val loss: {val_loss:.4f}\n"
+              f"val acc: {val_acc:.4f}\n"
+              f"val simple acc: {val_simple_acc:.4f}")
         
         training_log = {
             "train_time": train_time,
             "train_loss" : train_loss,
-            "train_acc" : train_acc
+            "train_acc" : train_acc,
+            "val_time": val_time,
+            "val_loss" : val_loss,
+            "val_acc" : val_acc
         }
         wandb.log(training_log)
 
