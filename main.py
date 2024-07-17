@@ -322,9 +322,9 @@ class VQAModel(nn.Module):
         self.vit = model_ViT.ViT(in_channels=3,
                                  num_classes=n_answer, # or n_answer
                                  emb_dim=384,
-                                 num_patch_row=4,#
+                                 num_patch_row=6,#
                                  image_size=224,
-                                 num_blocks=7*4,
+                                 num_blocks=7*7,
                                  head=8,
                                  hidden_dim=384*4,
                                  dropout=dropout)
@@ -407,7 +407,7 @@ def main():
     wandb.init(project="DL_lec-VQA_models") # name = {displayname} で保存名を指定することも可能
 
     # deviceの設定
-    set_seed(42)
+    set_seed(3407) # 42
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f'device : {device}') # 確認の為
 
@@ -425,14 +425,14 @@ def main():
     val_size = len(train_dataset) - train_size
     train_subset, val_subset = torch.utils.data.random_split(train_dataset, [train_size, val_size]) # 分割
 
-    train_loader = torch.utils.data.DataLoader(train_subset, batch_size=128, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(val_subset, batch_size=128, shuffle=True) # 検証用に追加
+    train_loader = torch.utils.data.DataLoader(train_subset, batch_size=128*2, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_subset, batch_size=128*2, shuffle=True) # 検証用に追加
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     model = VQAModel(vocab_size=len(train_dataset.words2idx)+1, n_answer=len(train_dataset.words2idx)).to(device)
 
     # optimizer / criterion
-    num_epoch = 20
+    num_epoch = 2
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-5)
 
@@ -466,17 +466,20 @@ def main():
     # 提出用ファイルの作成
     model.eval()
     submission = []
-    for image, question in test_loader:
+    print('submission...')
+    for image, question in tqdm(test_loader):
         image, question = image.to(device), question.to(device)
         pred = model(image, question)
         pred = pred.argmax(1).cpu().item()
         submission.append(pred)
 
-    submission = [train_dataset.idx2answer[id] for id in submission]
+    submission = [train_dataset.idx2words[id] for id in submission]
     submission = np.array(submission)
     torch.save(model.state_dict(), "model.pth")
     np.save("submission.npy", submission)
 
+    wandb.save('submission.npy')
+    wandb.save('model.pth')
     wandb.finish()
 
 if __name__ == "__main__":
