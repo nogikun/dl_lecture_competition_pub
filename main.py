@@ -16,6 +16,7 @@ import wandb
 
 # local
 from src.models.IMAGE import model_ViT
+from src.models.NLP import model_LSTM
 
 def set_seed(seed):
     random.seed(seed)
@@ -328,7 +329,7 @@ class VQAModel(nn.Module):
                                  head=8,
                                  hidden_dim=384*4,
                                  dropout=dropout)
-        self.text_encoder = nn.Linear(vocab_size, 512)
+        self.text_encoder = model_LSTM.LSTM(vocab_size, hidden_dim)
         self.fc = nn.Sequential(
             nn.Linear(42944, hidden_dim), # what 42944
             #nn.ReLU(inplace=True),
